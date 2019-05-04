@@ -1,31 +1,32 @@
-% =====================================================================%
-%            该程序完成16个脉冲信号的【脉压、动目标显示/动目标检测（MTI/MTD）】    
-% =====================================================================%
+% MTI/MTD信号处理
+%% 程序基本功能介绍 及初始化
+%  该程序完成16个脉冲信号的【脉压、动目标显示/动目标检测（MTI/MTD）】    
+
 %  程序中根据每个学生学号的末尾三位（依次为XYZ）来决定仿真参数，034
 %  目标距离为[3000 8025 9000+(Y*10+Z)*200 8025]，4个目标
 %  目标速度为[50 0 (Y*10+X+Z)*6 100]
-% ===================================================================%
 close all; %关闭所有图形
-clear all; %清除所有变量
+clear ; %清除所有变量
 clc;
 %% 雷达参数
 C=3.0e8;  %光速(m/s)
 RF=3.140e9/2;  %雷达射频 1.57GHz
 Lambda=C/RF;    %雷达工作波长
 PulseNumber=16;   %回波脉冲数
-BandWidth=2.0e6;  %发射信号带宽 带宽B=1/τ，τ是脉冲宽度 
-TimeWidth=42.0e-6; %发射信号时宽
+BandWidth=4.0e6;  %发射信号带宽 带宽B=1/τ，τ是脉冲宽度 
+TimeWidth=10.0e-6; %发射信号时宽
 PRT=240e-6;   % 雷达发射脉冲重复周期(s),240us对应1/2*240*300=36000米最大无模糊距离
 PRF=1/PRT;
-Fs=2.0e6;  %采样频率
+Fs=1e8;  %采样频率
 NoisePower=-12;%(dB);%噪声功率（目标为0dB）
+Fc = 30e6;
 % ---------------------------------------------------------------%
 SampleNumber=fix(Fs*PRT);%计算一个脉冲周期的采样点数；
 TotalNumber=SampleNumber*PulseNumber;%总的采样点数；
 BlindNumber=fix(Fs*TimeWidth);%计算一个脉冲周期的盲区-遮挡样点数；
 %% 目标参数 
 TargetNumber=4;%目标个数
-SigPower(1:TargetNumber)=[1 1 1 0.25];%目标功率,无量纲
+SigPower(1:TargetNumber)=[5 1 100 10.25];%目标功率,无量纲
 TargetDistance(1:TargetNumber)=[3000 8025 15800 8025];
 %目标距离,单位m   距离参数为[3000 8025 9000+(Y*10+Z)*200 8025]
 DelayNumber(1:TargetNumber)=fix(Fs*2*TargetDistance(1:TargetNumber)/C);
@@ -41,15 +42,26 @@ if rem(number,2)~=0  %rem求余
    number=number+1;
 end   %把number变为偶数
 
+Chirp = zeros(1,number); 
 for i=-fix(number/2):fix(number/2)-1
-   Chirp(i+fix(number/2)+1)=exp(j*(pi*(BandWidth/TimeWidth)*(i/Fs)^2));
-   %exp(j*fi)*，产生复数矩阵Chirp
+    Ft = Fc*i/Fs+(1/2)*(BandWidth/TimeWidth)*(i/Fs)^2; %线性调频波指数幂
+    Chirp(i+fix(number/2)+1)=exp(1i*2*pi*Ft);
+    %Chirp(i)=cos(pi*(2*Fc*i/Fs+(BandWidth/TimeWidth)*(i/Fs)^2));
+    %exp(j*fi)*，产生复数矩阵Chirp
 end
-coeff=conj(fliplr(Chirp));%把Chirp矩阵翻转并把复数共轭，产生脉压系数
 
-figure(1);%脉压系数的实部
+coeff=conj(fliplr(Chirp));
+%把Chirp矩阵翻转并把复数共轭，产生脉压系数
+% 简单解释一下就是这里取的是 h(t) = x(^*)(t_0-t) 中 t_0 = 0 的情景
+figure(1);
+subplot(2,1,1);
+%脉压系数的实部
 plot(real(Chirp));axis([0 90 -1.5 1.5]);title('脉压系数实部');
-
+%入射信号频率
+subplot(2,1,2);
+plot((0: Fs/number: Fs-Fs/number),abs(fft(Chirp)));
+%Chirp_fft = fft(real(Chirp));
+%plot((0: Fs/number: Fs/2-Fs/number),abs(Chirp_fft(1: number/2)));
 %% 产生目标回波串
 % 产生前3个目标的回波串
 SignalAll=zeros(1,TotalNumber);%所有脉冲的信号,先填0
@@ -63,31 +75,34 @@ for k=1:TargetNumber-1 % 依次产生各个目标
       Signal((i-1)*SampleNumber+1:i*SampleNumber)=SignalTemp; 
       %每个目标把16个SignalTemp排在一起
    end
-   FreqMove=exp(j*2*pi*TargetFd(k)*(0:TotalNumber-1)/Fs);
+   FreqMove=exp(1i*2*pi*TargetFd(k)*(0:TotalNumber-1)/Fs);
    %目标的多普勒速度*时间=目标的多普勒相移
    Signal=Signal.*FreqMove;%加上多普勒速度后的16个脉冲1个目标
    SignalAll=SignalAll+Signal;%加上多普勒速度后的16个脉冲4个目标
 end
-%% -------------------------产生第4个目标的回波串-------%
+%% 产生第4个目标的回波串-------%
    fi=pi/3;
    SignalTemp=zeros(1,SampleNumber);% 一个脉冲
    SignalTemp(DelayNumber(4)+1:DelayNumber(4)+number)=...
-       sqrt(SigPower(4))*exp(j*fi)*Chirp;
+       sqrt(SigPower(4))*exp(1i*fi)*Chirp;
    %一个脉冲的1个目标（未加多普勒速度）
    Signal=zeros(1,TotalNumber);
    for i=1:PulseNumber
       Signal((i-1)*SampleNumber+1:i*SampleNumber)=SignalTemp;
    end
-   FreqMove=exp(j*2*pi*TargetFd(4)*(0:TotalNumber-1)/Fs);%目标的多普勒速度*时间=目标的多普勒相移
+   FreqMove=exp(1i*2*pi*TargetFd(4)*(0:TotalNumber-1)/Fs);
+   %目标的多普勒速度*时间=目标的多普勒相移
    Signal=Signal.*FreqMove;
    SignalAll=SignalAll+Signal;
 
 figure(2);
-subplot(2,1,1);plot(real(SignalAll),'r-');title('目标信号的实部');grid on;zoom on;
+subplot(2,1,1);plot(real(SignalAll),'r-');title('目标信号的实部');...
+    grid on;zoom on;
 subplot(2,1,2);plot(imag(SignalAll));title('目标信号的虚部');grid on;zoom on;
 
 %% 产生系统噪声信号 
-SystemNoise=normrnd(0,10^(NoisePower/10),1,TotalNumber)+j*normrnd(0,10^(NoisePower/10),1,TotalNumber);
+SystemNoise=normrnd(0,10^(NoisePower/10),1,TotalNumber)...
+    +1i*normrnd(0,10^(NoisePower/10),1,TotalNumber);
 %均值为0，标准差为10^(NoisePower/10)的噪声
 %% 总的回波信号
 Echo=SignalAll+SystemNoise;% +SeaClutter+TerraClutter，加噪声之后的回波
@@ -101,18 +116,22 @@ subplot(2,1,2);plot(imag(Echo));title('总回波信号的虚部,闭锁期为0');
 pc_time0=conv(Echo,coeff);%pc_time0为Echo和coeff的卷积
 pc_time1=pc_time0(number:TotalNumber+number-1);%去掉暂态点 number-1个
 figure(4);%时域脉压结果的幅度
-subplot(2,1,1);plot(abs(pc_time0),'r-');title('时域脉压结果的幅度,有暂态点');%pc_time0的模的曲线
-subplot(2,1,2);plot(abs(pc_time1));title('时域脉压结果的幅度,无暂态点');%pc_time1的模的曲线
+subplot(2,1,1);plot(abs(pc_time0),'r-');title('时域脉压结果的幅度,有暂态点');
+%pc_time0的模的曲线
+subplot(2,1,2);plot(abs(pc_time1));title('时域脉压结果的幅度,无暂态点');
+%pc_time1的模的曲线
 % ================================频域脉压=================================%
-Echo_fft=fft(Echo,8192);%理应进行TotalNumber+number-1点FFT,但为了提高运算速度,进行了8192点的FFT
-coeff_fft=fft(coeff,8192);
+Echo_fft=fft(Echo,524288);
+%理应进行TotalNumber+number-1点FFT,但为了提高运算速度,进行了8192点的FFT
+coeff_fft=fft(coeff,524288);
 pc_fft=Echo_fft.*coeff_fft;
 pc_freq0=ifft(pc_fft);
 figure(5);
 subplot(2,1,1);plot(abs(pc_freq0(1:TotalNumber+number-1)));
 title('频域脉压结果的幅度,有前暂态点');
 subplot(2,1,2);
-plot(abs(pc_time0(1:TotalNumber+number-1)-pc_freq0(1:TotalNumber+number-1)),'r');
+plot(abs(pc_time0(1:TotalNumber+number-1)-...
+    pc_freq0(1:TotalNumber+number-1)),'r');
 title('时域和频域脉压的差别');
 pc_freq1=pc_freq0(number:TotalNumber+number-1);
 %去掉暂态点 number-1个,后填充点若干(8192-number+1-TotalNumber)
@@ -142,7 +161,7 @@ end
   
  %% 虚实矩阵转换
  
-coeff_fft_c=zeros(1,2*8192); 
+coeff_fft_c=zeros(1,2*524288); 
 for i=1:8192 
     coeff_fft_c(2*i-1)=real(coeff_fft(i)); 
     coeff_fft_c(2*i)=imag(coeff_fft(i)); 
